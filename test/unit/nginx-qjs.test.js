@@ -4,19 +4,32 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { render, optionsFrom } = require('../../scripts/render-nginx-config');
+test('nginx configuration is a directly editable server block, no generator needed', () => {
+  const config = fs.readFileSync(path.join(__dirname, '../../nginx/nginx.conf.example'), 'utf8');
+  const docs = fs.readFileSync(path.join(__dirname, '../../docs/nginx-quickjs.md'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '../../src/client/index.html'), 'utf8');
+  const appJs = fs.readFileSync(path.join(__dirname, '../../src/client/js/app.js'), 'utf8');
 
-test('nginx root and nested installation config derives path without hardcoded host', () => {
-  const base = { prefix: '/watch/deep/', resolver: '127.0.0.53', 'ca-bundle': '/etc/ssl/cert.pem' };
-  const config = render(base);
+  assert.match(config, /^server \{/m);
   assert.match(config, /js_engine qjs;/);
-  assert.match(config, /location \^~ \/watch\/deep\/api\//);
-  assert.match(config, /location = \/watch\/deep \{ return 308 \/watch\/deep\/; \}/);
-  assert.match(config.replace(/\\\\/g, '/'), /alias ".*src\/client\/";/);
-  assert.match(render({ ...base, prefix: '/' }), /location \^~ \/api\//);
-  assert.doesNotMatch(render({ ...base, prefix: '/' }), /return 308 \//);
-  assert.throws(() => render({ ...base, prefix: '/../admin/' }));
-  assert.throws(() => optionsFrom(['--prefix', '/foo/']));
+  assert.match(config, /js_import player from \/opt\/hongguo\/nginx\/player\.js;/);
+  assert.match(config, /js_content player\.api;/);
+  assert.match(config, /js_fetch_verify on;/);
+  assert.match(config, /location = \/watch \{\s*return 308 \/watch\//);
+  assert.match(config, /location \^~ \/watch\/api\/ \{/);
+  assert.match(config, /location \^~ \/watch\/ \{/);
+  assert.match(config, /alias \/opt\/hongguo\/src\/client\/;/);
+  assert.match(config, /try_files \$uri \$uri\/ =404;/);
+  assert.match(docs, /根路径（\/）部署/);
+  assert.match(docs, /部署及运行均不需要安装 Node\.js/);
+  assert.doesNotMatch(docs, /render-nginx-config/);
+
+  // Source URLs stay relative, so the same build works on / and any subpath.
+  for (const [, url] of html.matchAll(/(?:href|src)="([^"]+)"/g)) {
+    assert.ok(!/^\/(?:css|js|assets)\//.test(url), 'static asset URL must be relative: ' + url);
+  }
+  assert.match(appJs, /document\.currentScript\?\.src/);
+  assert.match(appJs, /const apiUrl = path => appBase/);
 });
 test('browser local store persists per subpath and rejects malformed ID', () => {
   const source = fs.readFileSync(path.join(__dirname, '../../src/client/js/local-store.js'), 'utf8');

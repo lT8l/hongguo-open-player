@@ -1,0 +1,45 @@
+# nginx QuickJS deployment example; copy this server block into the nginx http {} context.
+# Requires ngx_http_js_module and njs >= 0.9.1 (QuickJS ngx.fetch support).
+# If the module is dynamic, load it in the MAIN nginx context, for example:
+#   load_module modules/ngx_http_js_module.so;
+#
+# All values below are deployment examples: adapt the listen port, DNS, CA bundle,
+# absolute filesystem paths, and the /watch/ installation prefix to your server.
+# No host name or installation prefix is embedded in the application source.
+server {
+    listen 8080;
+    server_name _;
+
+    js_engine qjs;
+    js_import player from /opt/hongguo/nginx/player.js;
+
+    resolver 1.1.1.1 1.0.0.1 valid=300s;
+    js_fetch_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+    js_fetch_verify on;
+    js_fetch_timeout 12s;
+    js_fetch_max_response_buffer_size 16m;
+
+    # Canonicalize the installation URL so relative links resolve consistently.
+    # Remove this location entirely when deploying at /.
+    location = /watch {
+        return 308 /watch/;
+    }
+
+    # Keep the API and static assets under the SAME prefix.
+    location ^~ /watch/api/ {
+        js_content player.api;
+        add_header Cache-Control "no-store" always;
+    }
+
+    location ^~ /watch/ {
+        # alias must end in /, matching the trailing / on the location prefix.
+        alias /opt/hongguo/src/client/;
+        index index.html;
+        try_files $uri $uri/ =404;
+
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "no-referrer" always;
+        # Vue's bundled runtime template compiler currently requires unsafe-eval.
+        add_header Content-Security-Policy "default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' https: blob:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" always;
+    }
+}

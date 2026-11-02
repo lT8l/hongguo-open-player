@@ -1,52 +1,74 @@
 # nginx QuickJS / 任意子路径 Web 部署
 
-本分支保留 Electron / Express 桌面端实现，同时提供无需 Node.js 常驻服务的 nginx Web 版。项目不预设网站域名或部署子路径。
+本分支保留原 Electron / Express 桌面端，另提供 nginx + QuickJS 的 Web 部署方式。**部署及运行均不需要安装 Node.js，不需要构建或生成配置**。站点域名与安装子路径由 nginx 配置决定，前端自动从 JS 文件地址计算同源 API 基础路径。
 
-## 要求
+## 环境要求
 
-- nginx + ngx_http_js_module；njs 至少 0.9.1，以便 QuickJS 使用 ngx.fetch。
-- 能访问红果官网的 DNS / 网络，以及有效的 HTTPS CA 证书链。
-- Node.js 仅用于生成 nginx 配置，Web 服务实际运行时不需要 Node.js。
+- nginx 安装并启用 `ngx_http_js_module`，njs 版本至少 **0.9.1**（QuickJS `ngx.fetch`）。
+- nginx 服务器能访问官网 HTTPS；配置可用的 DNS resolver 与 TLS CA 证书。
+- Web 端直接托管仓库中的 `src/client/` 文件，后端执行 `nginx/player.js`，不运行 `src/server/index.js`。
+- 如 nginx 模块以动态模块安装，应在 nginx 主配置（`http {}` **之外**）加载，例如 `load_module modules/ngx_http_js_module.so;`；模块文件名与路径以发行版为准。
 
-## 生成 nginx 配置
+## 使用原生 nginx 配置文件
 
-以下 /watch/ 仅是示例，支持根路径 / 及任何符合 URL 路径规范的子路径。运行：
+直接查看或复制 [`nginx/nginx.conf.example`](../nginx/nginx.conf.example) 的 `server {}` 块，放入现有 nginx 的 `http {}` 内（如 `conf.d/hongguo.conf`），按环境编辑以下内容：
 
-~~~sh
-node scripts/render-nginx-config.js \
-  --prefix /watch/ \
-  --resolver 127.0.0.53 \
-  --ca-bundle /etc/ssl/certs/ca-certificates.crt \
-  --listen 8080 \
-  --server-name _ \
-  > /tmp/hongguo-server.conf
-~~~
+1. `listen`、`server_name`：沿用现有端口、站点域名或反向代理设置；示例 `server_name _` 是通配占位配置，不绑定域名。
+2. `js_import player from ...`：改成部署目录下 `nginx/player.js` 的**绝对路径**；`alias` 改成 `src/client/` 的绝对路径，并保留末尾斜杠。
+3. `resolver`、`js_fetch_trusted_certificate`：改为本机可用的 DNS 和 CA 文件路径，**不要禁用 TLS 验证**。
+4. 子路径：示例是 `/watch/`，可改成 `/video/`、`/apps/player/` 等。同步调整 `location = /watch` 的末尾斜杠重定向以及 `location ^~ /watch/api/` 和 `location ^~ /watch/`，确保三处使用同一个前缀。
 
-配置生成器默认指向本仓库 src/client 静态文件目录以及 nginx/player.js，可传入 --client-root 与 --script 指定绝对路径。输出是 nginx 的 server 块，请放入 http 上下文，并按发行版加载 ngx_http_js_module 动态模块。自定义证书与 resolver，请勿关闭 TLS 校验。随后运行 nginx -t 和 nginx -s reload。
+### 根路径（/）部署
 
-访问 https://你的域名/watch/，不带尾部斜杠的子路径会重定向到带斜杠形式。HTML 资源 URL 使用相对路径；客户端自动从正在运行的 js/app.js 脚本地址推导站点前缀，并请求相同前缀下的 api/，无须构建或替换代码。
+如需直接使用根路径 `https://站点域名/`，将原配置中的这三处替换为：
 
-## 收藏与播放记录
+```nginx
+# 根路径不需要 location = /watch 的重定向，删除它。
+location ^~ /api/ {
+    js_content player.api;
+    add_header Cache-Control "no-store" always;
+}
 
-这两类数据均存放在浏览器 localStorage，不上传到 nginx。收藏保存剧集名称、封面、集数和更新时间；历史保存最后一集、播放秒数、已看集数和更新时间，并在切换/暂停/关闭/播放过程中自动保存。
+location ^~ / {
+    alias /opt/hongguo/src/client/;
+    index index.html;
+    try_files $uri $uri/ =404;
+    # 保留示例配置中的静态资源安全响应头 / CSP
+}
+```
 
-localStorage 键名包含当前子路径，同一 origin 下不同安装目录可隔离数据。清除浏览器网站数据、换浏览器、换 origin/子路径将影响访问记录。原 Electron 版 data/user_data.json 不会自动迁移；更换部署前缀时，如需保留记录，可在浏览器开发工具中迁移对应的 localStorage 键。
+上面的根路径片段只演示需要修改的位置：请保留原示例中的其他 nginx 指令（包括 `js_engine qjs`、`js_import`、`resolver`、TLS 验证和安全响应头）。
 
-## QuickJS 功能边界
+### 启用和验证
 
-Web QuickJS API 通过固定的红果官方网站读取公开搜索、目录与剧集页面；只有官网明确提供并且身份校验一致的公开完整 MP4 才可播放。转发时校验剧集、vid 和目标媒体域名。受保护视频返回明确错误，不会把官方短预览当作整集。
+```sh
+nginx -t
+nginx -s reload
+```
 
-原桌面版的签名/解密、Range 转发、App 原生分类和演员功能使用 Node 专有依赖，本次未完整移植到 QuickJS；演员与诊断 API 返回 501。Web 目录只依赖官方公开网页，结构变更可能需要跟随更新。如果需要全部受保护视频，请保留使用 Electron 版。
+再访问 `https://站点域名/watch/`（或调整后的路径）。前端 `css/`、`js/`、`assets/` 都采用相对 URL；`js/app.js` 根据实际脚本 URL 计算 API 前缀，不需要重建、不需要改 JS，也无需 Node.js。
 
-## 校验
+若站点位于另一层反向代理之后，应避免代理层意外剥离子路径，确保用户看到的 URL 与上述 `location` 匹配。部署前先用 `nginx -t` 确认配置被目标 nginx 接受。
 
-~~~sh
+## 浏览器本地数据
+
+收藏和历史都保存在用户浏览器 `localStorage`，不会向 nginx 上传。收藏保存剧集 ID、名称和封面；历史保存集数、已看集数、当前播放秒数与更新时间，播放期间定时更新，并在切换剧集、暂停及关闭页面时保存。
+
+存储键包含安装前缀：同域不同子路径的数据隔离。更换域名、子路径或浏览器，以及清除站点数据，可能导致旧数据不可见。原 Electron 版 `data/user_data.json` 不会自动迁移。
+
+## QuickJS Web 版与 Electron 版差异
+
+Web 版仅调用官网公开页面，提供搜索、公开目录和剧集信息；仅在来源确实给出并验证了完整公开 MP4 时进行媒体重定向。原桌面端特有的视频加密签名/解密、Range 代理及 App 专有演员接口没有移植为等效 QuickJS 功能。受保护的视频会明确失败，演员接口返回 501；不应误认所有剧集都能在 Web 端完整播放。
+
+## 开发测试（可选）
+
+**只有运行仓库单元测试时才需要 Node.js**。这不是部署要求：
+
+```sh
 npm run test:unit
 node --check src/client/js/app.js
 node --check src/client/js/local-store.js
-node --check scripts/render-nginx-config.js
 node --check --input-type=module < nginx/player.js
-nginx -t
-~~~
+```
 
-nginx -t 需要在真正安装了 QuickJS 模块的目标环境执行。详见 nginx 官方的 [QuickJS 引擎](https://nginx.org/en/docs/njs/engine.html#quickjs_engine) 和 [ngx_http_js_module](https://nginx.org/en/docs/http/ngx_http_js_module.html) 文档。
+还需要在实际安装 QuickJS 模块的 nginx 上执行 `nginx -t` 和端到端验证，单元测试不能替代真实 nginx 测试。官方参考：[QuickJS 引擎](https://nginx.org/en/docs/njs/engine.html#quickjs_engine)、[ngx_http_js_module](https://nginx.org/en/docs/http/ngx_http_js_module.html)。
