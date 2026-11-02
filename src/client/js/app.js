@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 const { createApp, ref, computed, onMounted, onUnmounted, nextTick } = Vue;
+// Derive the same-origin installation prefix from this script's URL; no fixed host or path.
+const appBase = (() => {
+  const scriptUrl = document.currentScript?.src || '';
+  const marker = scriptUrl.lastIndexOf('/js/');
+  return marker >= 0 ? scriptUrl.slice(0, marker + 1) : '/';
+})();
+const apiUrl = path => appBase + String(path).replace(/^\\/+/, '');
+const apiFetch = (path, options) => fetch(apiUrl(path), options);
+const localStore = window.HongguoLocalStore;
 
 // 自动识别 macOS / Windows / Linux 宿主平台并注入 root class
 const isMac = /Mac|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.userAgentData && navigator.userAgentData.platform === 'macOS');
@@ -109,7 +118,7 @@ createApp({
     async function openLogDir() {
       showAppMenu.value = false;
       try {
-        const response = await fetch('/api/system/open-log-dir', { method: 'POST' });
+        const response = await apiFetch('/api/system/open-log-dir', { method: 'POST' });
         const res = await response.json();
         if (res?.success) {
           notify('已打开系统日志目录');
@@ -124,7 +133,7 @@ createApp({
     async function openLogFile() {
       showAppMenu.value = false;
       try {
-        const response = await fetch('/api/system/open-log-file', { method: 'POST' });
+        const response = await apiFetch('/api/system/open-log-file', { method: 'POST' });
         const res = await response.json();
         if (res?.success) {
           notify('已打开当前运行日志');
@@ -221,7 +230,7 @@ createApp({
     }
     function reportClientLog(level, message, extra) {
       try {
-        fetch('/api/client-log', {
+        apiFetch('/api/client-log', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ level, tag: 'ClientPlayer', message, extra })
@@ -239,7 +248,7 @@ createApp({
       // 计算下一集的 vid 便于代理服务无感预加载
       const nextEp = activeEpisodes.value.find(e => e.vid_index === activeEpisodeIndex.value + 1);
       const nextParam = nextEp?.vid ? `?next_vid=${nextEp.vid}` : '';
-      return `/api/stream/${ep.vid}${nextParam}`;
+      return apiUrl(`/api/stream/${encodeURIComponent(ep.vid)}${nextParam}`);
     });
 
     const playedPercent = computed(() => {
@@ -284,9 +293,15 @@ createApp({
         } else {
           url = `/api/catalog?category=${tab}&page=${currentPage.value}`;
         }
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`加载失败 (${response.status})`);
-        const data = await response.json();
+        // Personal data stays in this browser and never travels to nginx.
+        let data;
+        if (!submittedKeyword && (tab === 'history' || tab === 'favorites')) {
+          data = tab === 'history' ? localStore.getHistory() : localStore.getFavorites();
+        } else {
+          const response = await apiFetch(url);
+          if (!response.ok) throw new Error(`加载失败 (${response.status})`);
+          data = await response.json();
+        }
         if (request !== catalogRequest) return;
         if (Array.isArray(data)) {
           currentDramas.value = data.map(item => ({ ...item, watched_index: item.episode_index }));
@@ -438,12 +453,12 @@ createApp({
 
       try {
         const [detailRes, worksRes] = await Promise.allSettled([
-          fetch(`/api/actors/${encodeURIComponent(targetActorId)}`).then(async r => {
+          apiFetch(`/api/actors/${encodeURIComponent(targetActorId)}`).then(async r => {
             const json = await r.json();
             if (!r.ok || !json.success) throw new Error(json.error || `获取演员详情失败 (${r.status})`);
             return json;
           }),
-          fetch(`/api/actors/${encodeURIComponent(targetActorId)}/works?count=20&offset=0`).then(async r => {
+          apiFetch(`/api/actors/${encodeURIComponent(targetActorId)}/works?count=20&offset=0`).then(async r => {
             const json = await r.json();
             if (!r.ok || !json.success) throw new Error(json.error || `获取演员作品失败 (${r.status})`);
             return json;
@@ -496,7 +511,7 @@ createApp({
       actorWorksError.value = '';
 
       try {
-        const response = await fetch(`/api/actors/${encodeURIComponent(targetActorId)}/works?count=20&offset=${currentOffset}`);
+        const response = await apiFetch(`/api/actors/${encodeURIComponent(targetActorId)}/works?count=20&offset=${currentOffset}`);
         const data = await response.json();
         if (requestId !== currentActorRequestId || !activeActor.value || String(activeActor.value.actor_id) !== targetActorId) {
           return;
@@ -531,7 +546,7 @@ createApp({
       actorWorksError.value = '';
 
       try {
-        const response = await fetch(`/api/actors/${encodeURIComponent(targetActorId)}/works?count=20&offset=0`);
+        const response = await apiFetch(`/api/actors/${encodeURIComponent(targetActorId)}/works?count=20&offset=0`);
         const data = await response.json();
         if (requestId !== currentActorRequestId || !activeActor.value || String(activeActor.value.actor_id) !== targetActorId) {
           return;
@@ -724,7 +739,13 @@ createApp({
       isBuffering.value = true;
       reportClientLog('INFO', `打开短剧剧场: 《${drama.series_title || ''}》(seriesId=${drama.series_id})`);
       try {
-        const detail = await fetch(`/api/series/${encodeURIComponent(drama.series_id)}`).then(r => r.json());
+        const detail = await apiFetch(`/api/series/${encodeURIComponent(drama.series_id)}`).then(async r => {
+          const result = await r.json();
+          if (!r.ok) throw new Error(result.error || `HTTP ${r.status}`);
+          return result;
+        });
+        detail.saved_progress = localStore.getSeriesProgress(String(drama.series_id));
+        detail.is_favorite = localStore.isFavorite(String(drama.series_id));
         if (request !== theaterRequest) return;
         if (!detail || !detail.episodes || detail.episodes.length === 0) {
           throw new Error(detail?.error || '获取该短剧分集失败，请重试');
@@ -916,24 +937,18 @@ createApp({
       keepPlayerFocus();
     }
 
-    async function toggleFavCurrent() {
+    function toggleFavCurrent() {
       if (!activeSeries.value) return;
       try {
-        const res = await fetch('/api/favorites/toggle', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            series_id: activeSeries.value.series_id,
-            series_title: activeSeries.value.series_title,
-            cover: activeSeries.value.cover,
-            episode_count: activeSeries.value.total
-          })
-        }).then(r => r.json());
-        if (res.error) throw new Error(res.error);
-        isFavorited.value = !!res.is_favorite;
+        isFavorited.value = localStore.toggleFavorite({
+          series_id: String(activeSeries.value.series_id),
+          series_title: activeSeries.value.series_title,
+          cover: activeSeries.value.cover,
+          episode_count: activeSeries.value.total
+        });
       } catch (err) {
         console.error('收藏切换失败:', err);
-        notify('收藏保存失败，请稍后重试');
+        notify('收藏保存失败，请检查浏览器存储空间或隐私设置');
       } finally {
         keepPlayerFocus();
       }
@@ -1083,12 +1098,9 @@ createApp({
     function saveProgressNow() {
       if (!activeSeries.value || !progressReady || viewMode.value !== 'theater') return;
       const curEp = activeEpisodes.value.find(e => e.vid_index === activeEpisodeIndex.value);
-      fetch('/api/progress', {
-        keepalive: true,
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          series_id: activeSeries.value.series_id,
+      try {
+        localStore.updateProgress({
+          series_id: String(activeSeries.value.series_id),
           series_title: activeSeries.value.series_title,
           cover: activeSeries.value.cover,
           episode_index: activeEpisodeIndex.value,
@@ -1096,8 +1108,11 @@ createApp({
           position_sec: currentTime.value,
           duration_sec: duration.value,
           watched_indexes: [...(watchedMap.value.get(activeSeries.value.series_id) || [])]
-        })
-      }).then(response => { if (!response.ok) throw new Error('保存失败'); }).catch(() => notify('观看进度保存失败，请检查数据目录是否可写'));
+        });
+      } catch (error) {
+        console.error('浏览器保存进度失败:', error);
+        notify('观看进度保存失败，请检查浏览器本地存储');
+      }
     }
 
     function onImageError(e) {
