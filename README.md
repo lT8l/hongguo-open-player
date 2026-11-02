@@ -2,6 +2,8 @@
 
 # 红果开源播放器 (Hongguo Open Player)
 
+> nginx QuickJS Web 版（支持任意子路径与浏览器 localStorage）部署见 [docs/nginx-quickjs.md](docs/nginx-quickjs.md)。原 Electron 桌面版保留。
+
 [![CI](https://github.com/zfdang/hongguo-open-player/actions/workflows/ci.yml/badge.svg)](https://github.com/zfdang/hongguo-open-player/actions/workflows/ci.yml)
 [![Release](https://github.com/zfdang/hongguo-open-player/actions/workflows/build-release.yml/badge.svg)](https://github.com/zfdang/hongguo-open-player/actions/workflows/build-release.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
