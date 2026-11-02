@@ -12,7 +12,7 @@ test('nginx root and nested installation config derives path without hardcoded h
   assert.match(config, /js_engine qjs;/);
   assert.match(config, /location \^~ \/watch\/deep\/api\//);
   assert.match(config, /location = \/watch\/deep \{ return 308 \/watch\/deep\/; \}/);
-  assert.match(config, /alias ".*src\/client\/";/);
+  assert.match(config.replace(/\\\\/g, '/'), /alias ".*src\/client\/";/);
   assert.match(render({ ...base, prefix: '/' }), /location \^~ \/api\//);
   assert.doesNotMatch(render({ ...base, prefix: '/' }), /return 308 \//);
   assert.throws(() => render({ ...base, prefix: '/../admin/' }));
