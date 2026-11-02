@@ -1,7 +1,0 @@
-node_modules/
-dist/
-dist-electron/
-data/*.json
-.DS_Store
-*.log
-*.apk

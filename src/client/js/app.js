@@ -6,7 +6,7 @@ const appBase = (() => {
   const marker = scriptUrl.lastIndexOf('/js/');
   return marker >= 0 ? scriptUrl.slice(0, marker + 1) : '/';
 })();
-const apiUrl = path => appBase + String(path).replace(/^\\/+/, '');
+const apiUrl = path => appBase + String(path).replace(/^[/]+/, '');
 const apiFetch = (path, options) => fetch(apiUrl(path), options);
 const localStore = window.HongguoLocalStore;
 

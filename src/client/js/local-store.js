@@ -9,7 +9,7 @@
   const empty = () => ({ history: Object.create(null), favorites: Object.create(null) });
   const idOf = item => {
     const id = String(item?.series_id ?? '');
-    if (!/^\\d{1,30}$/.test(id)) throw new TypeError('series_id 必须是数字字符串');
+    if (!/^[0-9]{1,30}$/.test(id)) throw new TypeError('series_id 必须是数字字符串');
     return id;
   };
   function read() {
