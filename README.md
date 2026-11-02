@@ -2,6 +2,8 @@
 
 # 红果开源播放器 (Hongguo Open Player)
 
+> nginx QuickJS Web 版无需 Node.js 生成配置或构建，直接编辑 [nginx/nginx.conf.example](nginx/nginx.conf.example) 即可。部署步骤见 [docs/nginx-quickjs.md](docs/nginx-quickjs.md)；原 Electron 桌面版保留。
+
 [![CI](https://github.com/zfdang/hongguo-open-player/actions/workflows/ci.yml/badge.svg)](https://github.com/zfdang/hongguo-open-player/actions/workflows/ci.yml)
 [![Release](https://github.com/zfdang/hongguo-open-player/actions/workflows/build-release.yml/badge.svg)](https://github.com/zfdang/hongguo-open-player/actions/workflows/build-release.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)

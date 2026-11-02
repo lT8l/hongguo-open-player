@@ -5,13 +5,27 @@ const vm = require('node:vm');
 function client(fetch, overrides = {}) {
   let state;
   const mounted = [];
+  const data = { history: Object.create(null), favorites: Object.create(null) };
+  const store = {
+    getHistory: () => Object.values(data.history),
+    getFavorites: () => Object.values(data.favorites),
+    getSeriesProgress: id => data.history[id] || null,
+    isFavorite: id => Object.hasOwn(data.favorites, id),
+    updateProgress(item) { data.history[item.series_id] = item; return item; },
+    toggleFavorite(item) {
+      if (data.favorites[item.series_id]) { delete data.favorites[item.series_id]; return false; }
+      data.favorites[item.series_id] = item; return true;
+    }
+  };
+  const browser = { addEventListener() {}, removeEventListener() {}, HongguoLocalStore: store, ...overrides.window };
   vm.runInNewContext(fs.readFileSync(require.resolve('../../src/client/js/app.js'), 'utf8'), {
     Vue: { ref: value => ({ value }), computed: fn => ({ get value() { return fn(); } }),
       nextTick: async fn => { if (fn) fn(); }, onMounted(fn) { mounted.push(fn); }, onUnmounted() {},
       createApp: options => ({ mount() { state = options.setup(); } }) },
     navigator: { userAgent: '' }, document: { documentElement: { classList: { add() {} } } },
-    fetch, console, setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {}, window: { addEventListener() {}, removeEventListener() {} }, ...overrides
+    fetch, console, setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {}, ...overrides, window: browser
   });
+  state.localStoreForTest = store;
   state.mountForTest = () => mounted.forEach(fn => fn());
   return state;
 }
@@ -21,19 +35,18 @@ test('late catalog responses cannot replace the active tab; search pagination ke
   const requests = [];
   const state = client(url => new Promise(resolve => requests.push({ url, resolve })));
   const first = state.loadCatalog();
+  state.localStoreForTest.toggleFavorite({ series_id: '2' });
   state.switchTab('favorites');
-  requests[1].resolve(response([{ series_id: '2' }]));
-  await new Promise(resolve => setImmediate(resolve));
   requests[0].resolve(response({ results: [{ series_id: '1' }] }));
   await first;
   assert.equal(state.currentDramas.value[0].series_id, '2');
   state.searchKeyword.value = '离婚';
   const search = state.handleSearch();
-  requests[2].resolve(response({ results: [], hasMore: true }));
+  requests[1].resolve(response({ results: [], hasMore: true }));
   await search;
   state.changePage(1);
-  assert.match(requests[3].url, /keyword=.*&page=2$/);
-  requests[3].resolve(response({ results: [], hasMore: false }));
+  assert.match(requests[2].url, /keyword=.*&page=2$/);
+  requests[2].resolve(response({ results: [], hasMore: false }));
 });
 
 module.exports = { client, response };
@@ -57,17 +70,16 @@ test('search from saved lists enters search mode and keeps paging independent of
     assert.equal(requests.at(-1), '/api/search?keyword=%E7%A6%BB%E5%A9%9A&page=2');
     state.switchTab(tab);
     assert.equal(state.currentPage.value, 1);
-    assert.equal(requests.at(-1), `/api/${tab}`);
+    assert.equal(state.currentDramas.value.length, 0);
   }
 });
 
 test('switching series and episodes resets progress and canplay preserves a user pause', async () => {
   const saved = [];
   const series = id => ({ series_id: id, episodes: [{ vid: `${id}1`, vid_index: 1 }, { vid: `${id}2`, vid_index: 2 }] });
-  const state = client(async (url, options) => {
-    if (url === '/api/progress') { saved.push(JSON.parse(options.body)); return response({}); }
-    return response(series(url.split('/').pop()));
-  });
+  const state = client(async url => response(series(url.split('/').pop())));
+  const originalUpdate = state.localStoreForTest.updateProgress;
+  state.localStoreForTest.updateProgress = item => { saved.push(item); return originalUpdate(item); };
   await state.openTheater({ series_id: '1' });
   let plays = 0;
   const video = { duration: 100, currentTime: 42, buffered: { length: 0 }, paused: true,
@@ -102,7 +114,9 @@ test('a pending drama detail cannot reopen theater after navigating away', async
 
 test('favoriting a long series sends metadata without its full episode list', async () => {
   let body;
-  const state = client(async (url, options) => { body = JSON.parse(options.body); return response({ is_favorite: true }); });
+  const state = client(async () => response([]));
+  const originalToggle = state.localStoreForTest.toggleFavorite;
+  state.localStoreForTest.toggleFavorite = item => { body = item; return originalToggle(item); };
   state.activeSeries.value = { series_id: '123', total: 1000, episodes: Array(1000).fill({ title: 'x'.repeat(1000) }) };
   await state.toggleFavCurrent();
   assert.equal(body.episode_count, 1000);
@@ -125,7 +139,8 @@ test('fullscreen Escape preserves theater and select keys do not switch episodes
 });
 
 test('volume adjustment clears mute and resume hydrates only recorded watched episodes', async () => {
-  const state = client(async () => response({ series_id: '1', episodes: [{ vid: '1', vid_index: 1 }], saved_progress: { watched_indexes: [1, 3], episode_index: 1 } }));
+  const state = client(async () => response({ series_id: '1', episodes: [{ vid: '1', vid_index: 1 }] }));
+  state.localStoreForTest.updateProgress({ series_id: '1', watched_indexes: [1, 3], episode_index: 1 });
   await state.openTheater({ series_id: '1' });
   assert.equal(state.isEpisodeWatched(1), true); assert.equal(state.isEpisodeWatched(2), false);
   state.videoEl.value = { volume: 0, muted: true };
