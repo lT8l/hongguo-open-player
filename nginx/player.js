@@ -47,10 +47,8 @@ function decodeHtml(s) {
 }
 function publicCover(value) {
   const raw = text(value);
-  try {
-    const url = new URL(raw);
-    return url.protocol === 'https:' && !url.username && !url.password ? raw : '';
-  } catch { return ''; }
+  // Do not depend on the browser URL class: nginx QuickJS has no DOM URL API.
+  return /^https:\/\/[a-z0-9.-]+\/[^@\s]*$/i.test(raw) ? raw : '';
 }
 function tagsOf(item) {
   const items = Array.isArray(item?.tags) ? item.tags : Array.isArray(item?.category_list) ? item.category_list : [];
@@ -91,7 +89,7 @@ function readRouterData(html) {
 }
 async function getText(url) {
   // Every caller builds a URL under the single fixed origin, never a user-supplied host.
-  if (new URL(url).origin !== SITE) throw new Error('不允许访问未知上游');
+  if (typeof url !== 'string' || !url.startsWith(SITE + '/')) throw new Error('不允许访问未知上游');
   const response = await ngx.fetch(url, { headers: WEB_HEADERS, method: 'GET' });
   if (!response.ok) throw new Error('官网响应 HTTP ' + response.status);
   return await response.text();
@@ -174,12 +172,13 @@ async function series(r, id) {
       series_id: sid, series_title: title, cover })) });
 }
 function publicVideoUrl(raw, vid) {
-  try {
-    const url = new URL(text(raw).replace(/&amp;/g, '&'));
-    if (url.protocol !== 'https:' || url.username || url.password || !MEDIA_DOMAINS.test(url.hostname)) return null;
-    if (url.hostname === 'hongguoduanju.com' && !url.pathname.startsWith('/video/public/' + vid + '/')) return null;
-    return url.href;
-  } catch { return null; }
+  const value = text(raw).replace(/&amp;/g, '&');
+  // Reject credentials, custom ports and unknown hosts before issuing a 302.
+  const match = /^https:\/\/([a-z0-9.-]+)(\/[^?#\s@]*)(?:[?#][^\s]*)?$/i.exec(value);
+  if (!match || !MEDIA_DOMAINS.test(match[1])) return null;
+  if (match[1].toLowerCase() === 'hongguoduanju.com' &&
+      !match[2].startsWith('/video/public/' + vid + '/')) return null;
+  return value;
 }
 function inspectVideo(html, vid) {
   const data = readRouterData(html).loaderData?.['player_(series_id)/(vid)/page'];
@@ -199,13 +198,11 @@ function inspectVideo(html, vid) {
     if (video?.['@type'] !== 'VideoObject') continue;
     const source = publicVideoUrl(video.contentUrl, vid);
     if (!source) continue;
-    let official;
-    try { official = new URL(video.url); } catch { continue; }
-    if (official.origin !== SITE) continue;
-    const currentPath = '/player/' + sid;
-    if (official.pathname !== currentPath + '/' + vid &&
-      !(official.pathname === currentPath && source.startsWith(SITE + '/video/public/' + vid + '/'))) continue;
-    if (video['@id'] && video['@id'] !== video.url) continue;
+    const official = text(video.url).replace(/\/$/, '');
+    const currentPath = SITE + '/player/' + sid;
+    if (official !== currentPath + '/' + vid &&
+      !(official === currentPath && source.startsWith(SITE + '/video/public/' + vid + '/'))) continue;
+    if (video['@id'] && text(video['@id']).replace(/\/$/, '') !== official) continue;
     return source;
   }
   return null;
