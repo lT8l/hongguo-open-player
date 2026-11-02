@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
+  <title>红果开源播放器 - Hongguo Open Player</title>
+  <link rel="stylesheet" href="css/app.css">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+</head>
+<body class="dark-theme">
+  <div id="app">
+    <!-- 顶部导航栏 -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand" @click="goHome" title="返回首页">
+          <img class="brand-icon" src="assets/app-icon.png" alt="" width="28" height="28" aria-hidden="true">
+          <span class="brand-name"><span class="brand-accent">红果</span><span class="brand-suffix">开源播放器</span></span>
+        </div>
+        <nav class="nav-tabs">
+          <button class="nav-item" :class="{ active: currentTab === 'hot-drama' && viewMode === 'catalog' }" @click="switchTab('hot-drama')">🔥 热门榜单</button>
+          <button class="nav-item" :class="{ active: currentTab === 'actors' && viewMode === 'catalog' }" @click="switchTab('actors')">🌟 剧星榜</button>
+          <button class="nav-item" :class="{ active: currentTab === 'real-drama' && viewMode === 'catalog' }" @click="switchTab('real-drama')">🎭 真人短剧</button>
+          <button class="nav-item" :class="{ active: currentTab === 'comic-drama' && viewMode === 'catalog' }" @click="switchTab('comic-drama')">🎨 精品漫剧</button>
+          <button class="nav-item" :class="{ active: currentTab === 'ai-drama' && viewMode === 'catalog' }" @click="switchTab('ai-drama')">🤖 AI 短剧</button>
+          <button class="nav-item" :class="{ active: currentTab === 'history' }" @click="switchTab('history')">🕒 观影历史</button>
+          <button class="nav-item" :class="{ active: currentTab === 'favorites' }" @click="switchTab('favorites')">⭐ 我的收藏</button>
+        </nav>
+      </div>
+
+      <div class="header-right">
+        <div class="search-box" :class="{ 'has-query': searchKeyword.trim() }">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+          <input 
+            type="text" 
+            v-model="searchKeyword" 
+            @keydown.enter="handleSearch" 
+            placeholder="搜索短剧"
+            aria-label="搜索短剧名、主角或题材"
+          />
+          <button v-if="searchKeyword" class="clear-btn" @click="searchKeyword = ''">✕</button>
+          <button class="search-btn" @click="handleSearch">搜索</button>
+        </div>
+
+        <!-- 菜单与帮助入口 (类似 Android 三横线菜单图标) -->
+        <div class="header-menu-container">
+          <button 
+            class="header-menu-btn" 
+            :class="{ active: showAppMenu }" 
+            @click.stop="toggleAppMenu" 
+            aria-label="菜单与帮助" 
+            title="菜单与帮助"
+          >
+            <svg class="header-menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="3.5" y1="6" x2="20.5" y2="6"></line>
+              <line x1="3.5" y1="12" x2="20.5" y2="12"></line>
+              <line x1="3.5" y1="18" x2="20.5" y2="18"></line>
+            </svg>
+          </button>
+
+          <!-- 下拉菜单 -->
+          <div v-if="showAppMenu" class="header-dropdown-menu" @click.stop>
+            <button class="dropdown-item" @click="openShortcutsModal">
+              <span class="dropdown-icon">⌨️</span>
+              <span class="dropdown-label">快捷键指南</span>
+            </button>
+            <button class="dropdown-item" @click="openLogDir">
+              <span class="dropdown-icon">📁</span>
+              <span class="dropdown-label">打开日志目录</span>
+            </button>
+            <button class="dropdown-item" @click="openLogFile">
+              <span class="dropdown-icon">📄</span>
+              <span class="dropdown-label">查看运行日志</span>
+            </button>
+            <div class="dropdown-divider"></div>
+            <button class="dropdown-item" @click="openGithubRepo">
+              <span class="dropdown-icon">🌐</span>
+              <span class="dropdown-label">GitHub 项目主页</span>
+            </button>
+            <button class="dropdown-item" @click="openAboutModal">
+              <span class="dropdown-icon">ℹ️</span>
+              <span class="dropdown-label">关于 红果开源播放器</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- 主体内容区域 -->
+    <main class="app-main" :inert="activeActor ? true : undefined" :aria-hidden="activeActor ? 'true' : undefined">
+      <!-- 快捷搜索推荐标签 -->
+      <section v-if="viewMode === 'catalog' && currentTab !== 'history' && currentTab !== 'favorites' && currentTab !== 'actors'" class="chips-bar">
+        <span class="chips-label">热门搜索：</span>
+        <button v-for="tag in hotTags" :key="tag" class="chip-item" @click="quickSearch(tag)">{{ tag }}</button>
+      </section>
+
+      <!-- 剧星榜（演员排行榜）视图 -->
+      <div v-if="viewMode === 'catalog' && currentTab === 'actors'" class="actor-ranking-container">
+        <!-- 榜单横幅介绍 -->
+        <div class="actor-banner">
+          <div class="actor-banner-content">
+            <div class="actor-banner-title-row">
+              <span class="actor-banner-icon">🌟</span>
+              <h2 class="actor-banner-title">红果短剧 · 剧星榜</h2>
+              <span v-if="actorRankDate" class="actor-rank-date-badge">统计截至 {{ actorRankDate }}</span>
+            </div>
+            <p class="actor-banner-desc">按演员参演剧播放量、粉丝关注及全网讨论热度综合排序 · 点击演员卡片查看详细主页与全部参演短剧</p>
+          </div>
+        </div>
+
+        <!-- 演员性别分类筛选条 -->
+        <div class="actor-filter-bar">
+          <span class="actor-filter-label">演员筛选：</span>
+          <div class="actor-filter-chips">
+            <button
+              class="actor-filter-chip"
+              :class="{ active: actorGender === 'all' }"
+              @click="switchActorGender('all')"
+            >
+              🌟 全部
+            </button>
+            <button
+              class="actor-filter-chip"
+              :class="{ active: actorGender === 'male' }"
+              @click="switchActorGender('male')"
+            >
+              👨 男演员
+            </button>
+            <button
+              class="actor-filter-chip"
+              :class="{ active: actorGender === 'female' }"
+              @click="switchActorGender('female')"
+            >
+              👩 女演员
+            </button>
+          </div>
+        </div>
+
+        <!-- 演员骨架屏加载 -->
+        <div v-if="loadingActors" class="actor-grid" aria-label="正在加载剧星榜" aria-busy="true">
+          <div v-for="n in 8" :key="n" class="skeleton-actor-card" aria-hidden="true">
+            <div class="skeleton-avatar"></div>
+            <div class="skeleton-line" style="width: 60%; margin: 12px auto 6px;"></div>
+            <div class="skeleton-line short" style="width: 40%; margin: 0 auto;"></div>
+          </div>
+        </div>
+
+        <!-- 演员为空状态 -->
+        <div v-else-if="actors.length === 0" class="empty-state">
+          <span class="empty-icon">🎭</span>
+          <h3>暂无剧星榜数据</h3>
+          <p>请稍后刷新重试</p>
+        </div>
+
+        <!-- 演员卡片网格 -->
+        <div v-else class="actor-grid">
+          <div
+            v-for="actor in actors"
+            :key="actor.actor_id"
+            class="actor-card"
+            :class="'rank-top-' + actor.rank"
+            @click="openActorDetail(actor)"
+          >
+            <!-- 排名与名次变化标识 -->
+            <div class="actor-card-header">
+              <div class="actor-rank-badge" :class="'top-' + actor.rank">
+                <span v-if="actor.rank === 1" class="rank-medal">🥇</span>
+                <span v-else-if="actor.rank === 2" class="rank-medal">🥈</span>
+                <span v-else-if="actor.rank === 3" class="rank-medal">🥉</span>
+                <span class="rank-num">TOP {{ actor.rank }}</span>
+              </div>
+              <div class="actor-rank-change" :class="getRankChangeClass(actor.rank_change)">
+                <span v-if="actor.rank_change?.type === 1">▲ {{ actor.rank_change.num || 1 }}</span>
+                <span v-else-if="actor.rank_change?.type === 2">▼ {{ actor.rank_change.num || 1 }}</span>
+                <span v-else>—</span>
+              </div>
+            </div>
+
+            <!-- 头像与人气 -->
+            <div class="actor-avatar-wrapper">
+              <img :src="actor.avatar" :alt="actor.name" class="actor-avatar" loading="lazy" referrerpolicy="no-referrer" @error="onAvatarError" />
+            </div>
+
+            <div class="actor-content">
+              <h3 class="actor-name" :title="actor.name">{{ actor.name }}</h3>
+              <div class="actor-score-tag">
+                <span class="fire-icon">🔥</span> {{ actor.score || '人气热推' }}
+              </div>
+              <div v-if="actor.sub_titles?.length" class="actor-tags">
+                <span v-for="(tag, i) in actor.sub_titles" :key="i" class="actor-tag">{{ tag }}</span>
+              </div>
+              <p v-if="actor.intro" class="actor-intro" :title="actor.intro">{{ actor.intro }}</p>
+            </div>
+
+            <div class="actor-card-footer">
+              <span class="view-works-btn">主页与作品 ❯</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 演员榜分页器 -->
+        <div v-if="actors.length > 0" class="pagination-bar">
+          <button :disabled="actorPage <= 1 || loadingActors" class="page-btn" @click="changeActorPage(-1)">上一页</button>
+          <span class="page-indicator">第 {{ actorPage }} 页</span>
+          <button :disabled="loadingActors || !actorHasMore" class="page-btn" @click="changeActorPage(1)">下一页</button>
+        </div>
+      </div>
+
+      <!-- 剧集卡片网格列表 -->
+      <div v-if="viewMode === 'catalog' && currentTab !== 'actors'" class="catalog-container">
+        <!-- 加载中指示器 -->
+        <div v-if="loadingCatalog" class="drama-grid" aria-label="正在加载短剧" aria-busy="true">
+          <div v-for="n in 8" :key="n" class="skeleton-card" aria-hidden="true">
+            <div class="skeleton-cover"></div><div class="skeleton-line"></div><div class="skeleton-line short"></div>
+          </div>
+        </div>
+
+        <!-- 加载错误状态与重试 -->
+        <div v-else-if="catalogError" class="empty-state error-state">
+          <span class="empty-icon">⚠️</span>
+          <h3>短剧加载失败</h3>
+          <p>{{ catalogError }}</p>
+          <button class="retry-btn" @click="loadCatalog" style="margin-top: 14px; padding: 8px 20px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); color: #fff; cursor: pointer;">重试加载</button>
+        </div>
+
+        <!-- 列表空状态 -->
+        <div v-else-if="currentDramas.length === 0" class="empty-state">
+          <span class="empty-icon">📺</span>
+          <h3>{{ currentTab === 'history' ? '暂无观看历史' : currentTab === 'favorites' ? '暂无收藏短剧' : '暂无相关短剧内容' }}</h3>
+          <p>{{ currentTab === 'history' ? '播放过的短剧会显示在这里' : currentTab === 'favorites' ? '点击短剧海报旁的“收藏”即可快速添加' : currentTab === 'search' ? '未找到相关短剧，换个搜索关键词试试吧' : '换个搜索关键词，或者切换分类标签试试吧' }}</p>
+        </div>
+
+        <!-- 卡片网格 -->
+        <div v-else class="drama-grid">
+          <div 
+            v-for="drama in currentDramas" 
+            :key="drama.series_id" 
+            class="drama-card"
+            @click="openTheater(drama)"
+          >
+            <div class="card-cover-wrapper">
+              <img :src="drama.cover" :alt="drama.series_title" loading="lazy" class="card-cover" @error="onImageError"/>
+              <div class="cover-overlay">
+                <span class="play-badge">▶ 立即播放</span>
+              </div>
+              <span class="episode-badge">{{ drama.episode_count ? `全 ${drama.episode_count} 集` : '短剧' }}</span>
+              <span v-if="drama.watched_index" class="progress-badge">已看至第 {{ drama.watched_index }} 集</span>
+            </div>
+            <div class="card-info">
+              <h4 class="drama-title" :title="drama.series_title">{{ drama.series_title }}</h4>
+              <div class="card-tags">
+                <span v-for="(t, i) in (drama.tags || []).slice(0, 3)" :key="i" class="card-tag">{{ t }}</span>
+              </div>
+              <p v-if="drama.description" class="drama-desc">{{ drama.description }}</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 分页控制器 -->
+        <div v-if="(currentDramas.length > 0 || currentPage > 1) && currentTab !== 'history' && currentTab !== 'favorites'" class="pagination-bar">
+          <button :disabled="currentPage <= 1 || loadingCatalog" class="page-btn" @click="changePage(-1)">上一页</button>
+          <span class="page-indicator">第 {{ currentPage }} 页</span>
+          <button :disabled="loadingCatalog || !hasMore" class="page-btn" @click="changePage(1)">下一页</button>
+        </div>
+      </div>
+
+      <!-- 沉浸式剧场/播放器视图 -->
+      <div v-if="viewMode === 'theater'" class="theater-view">
+        <!-- 播放器主体 (竖屏 9:16) -->
+        <div class="player-container" :class="{ 'is-fullscreen': isFullscreen, 'controls-hidden': isControlsHidden }" tabindex="-1" @pointermove="resetControlsTimer" @mousemove="resetControlsTimer" @click="resetControlsTimer">
+          <div class="player-header">
+            <button class="back-btn" @click="closeTheater">✕ 退出播放</button>
+            <div class="now-playing-info">
+              <h3 class="playing-title">{{ activeSeries?.series_title }}</h3>
+              <span class="playing-ep-badge">第 {{ activeEpisodeIndex }} 集 / 全 {{ activeSeries?.total || activeEpisodes.length }} 集</span>
+            </div>
+            <div class="player-actions">
+              <button class="fav-action-btn" :class="{ favorited: isFavorited }" @click="toggleFavCurrent" :title="isFavorited ? '取消收藏' : '收藏此剧'">
+                {{ isFavorited ? '❤️ 已收藏' : '🤍 收藏' }}
+              </button>
+              <button 
+                class="sidebar-toggle-btn" 
+                :class="{ active: sidebarOpen }" 
+                @click="sidebarOpen = !sidebarOpen" 
+                :aria-expanded="sidebarOpen" 
+                aria-controls="episode-sidebar" 
+                :title="sidebarOpen ? '收起右侧选集面板' : '展开右侧选集面板'"
+              >
+                <!-- 展开状态：右侧栏高亮 + 向右收起箭头 -->
+                <svg v-if="sidebarOpen" class="sidebar-toggle-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                  <rect width="13" height="11" x="1.5" y="2.5" rx="1.5"/>
+                  <path d="M10 2.5v11"/>
+                  <path d="M10 2.5h3a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-3z" fill="currentColor" fill-opacity="0.25" stroke="none"/>
+                  <path d="m5.5 6.5 1.75 1.5-1.75 1.5"/>
+                </svg>
+                <!-- 收起状态：右侧栏虚线 + 向左拉出箭头 -->
+                <svg v-else class="sidebar-toggle-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                  <rect width="13" height="11" x="1.5" y="2.5" rx="1.5"/>
+                  <path d="M10 2.5v11" stroke-dasharray="1.5 1.5"/>
+                  <path d="m7.25 6.5-1.75 1.5 1.75 1.5"/>
+                </svg>
+                <span class="sidebar-toggle-label">{{ sidebarOpen ? '收起选集' : '展开选集' }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 视频播放核心区 -->
+          <div class="video-stage">
+            <div v-if="osdMessage" class="player-osd" role="status">{{ osdMessage }}</div>
+            <video 
+              :key="currentStreamUrl"
+              ref="videoEl"
+              class="video-element"
+              :class="{ 'fit-cover': fitMode === 'cover' }"
+              :src="currentStreamUrl"
+              playsinline
+              preload="auto"
+              autoplay
+              @play="onPlay"
+              @pause="onPause"
+              @canplay="onCanPlay"
+              @loadeddata="onCanPlay"
+              @timeupdate="onTimeUpdate"
+              @ended="onEnded"
+              @loadedmetadata="onLoadedMetadata"
+              @waiting="isBuffering = true"
+              @playing="isBuffering = false"
+              @error="onVideoError"
+              @click="handleVideoClick"
+            ></video>
+
+            <!-- 居中缓冲加载环 -->
+            <div v-if="isBuffering" class="player-buffering">
+              <div class="spinner"></div>
+              <span>正在解密加载...</span>
+            </div>
+
+            <!-- 播放/暂停中心大图标反馈 -->
+            <div v-if="!isPlaying && !isBuffering" class="play-overlay-btn" @click="togglePlay">
+              <span class="play-icon">▶</span>
+            </div>
+
+            <!-- 错误提示遮罩 -->
+            <div v-if="videoErrorMessage" class="video-error-overlay">
+              <span class="error-icon">⚠️</span>
+              <h4>{{ videoErrorMessage }}</h4>
+              <button class="retry-btn" @click="retryCurrentEpisode">重试本集</button>
+            </div>
+          </div>
+
+          <!-- 播放器控制条 -->
+          <div class="player-controls" @pointerenter="clearControlsTimer" @pointerleave="resetControlsTimer">
+            <!-- 进度条 -->
+            <div class="progress-bar-container" :class="{ 'is-scrubbing': isScrubbing }" @pointermove="previewSeek" @pointerleave="showPreview = false">
+              <span v-if="showPreview || isScrubbing" class="progress-time-tooltip" :style="{ left: previewPercent + '%' }">{{ formatTime(isScrubbing ? currentTime : previewTime) }}</span>
+              <input class="seek-input" type="range" min="0" :max="duration || 0" step="0.1" :value="currentTime"
+                :disabled="!duration" aria-label="播放进度" :aria-valuetext="formatTime(currentTime)"
+                @input="seekFromSlider" @pointerdown="startScrubbing" @pointerup="finishScrubbing" @pointercancel="finishScrubbing" @lostpointercapture="finishScrubbing" />
+              <div class="progress-bar-buffered" :style="{ width: bufferedPercent + '%' }"></div>
+              <div class="progress-bar-played" :style="{ width: playedPercent + '%' }"></div>
+              <div class="progress-bar-thumb" :style="{ left: playedPercent + '%' }"></div>
+            </div>
+
+            <div class="controls-toolbar">
+              <div class="controls-left">
+                <button class="ctrl-btn" @click="togglePlay" :title="isPlaying ? '暂停 (Space)' : '播放 (Space)'">
+                  {{ isPlaying ? '⏸' : '▶' }}
+                </button>
+                <button class="ctrl-btn" @click="playPrevEpisode" :disabled="activeEpisodeIndex <= 1" title="上一集 (↑)">
+                  ⏮
+                </button>
+                <button class="ctrl-btn" @click="playNextEpisode" :disabled="activeEpisodeIndex >= activeEpisodes.length" title="下一集 (↓)">
+                  ⏭
+                </button>
+                <span class="time-display">{{ formatTime(currentTime) }} / {{ formatTime(duration) }}</span>
+              </div>
+
+              <div class="controls-right">
+                <!-- 画面比例模式 -->
+                <button class="ctrl-btn fit-btn" @click="toggleFitMode" :title="'画面比例 (当前: ' + (fitMode === 'contain' ? '完整自适应' : '铺满全屏') + ')'">
+                  {{ fitMode === 'contain' ? '⤢ 适应' : '⛶ 铺满' }}
+                </button>
+                <!-- 倍速选择 -->
+                <div class="speed-selector">
+                  <select v-model="playbackRate" @change="changeSpeed">
+                    <option value="0.75">0.75x</option>
+                    <option value="1.0">1.0x</option>
+                    <option value="1.25">1.25x</option>
+                    <option value="1.5">1.5x</option>
+                    <option value="2.0">2.0x</option>
+                  </select>
+                </div>
+                <!-- 音量 -->
+                <div class="volume-box">
+                  <button class="ctrl-btn volume-btn" @click="toggleMute">{{ isMuted ? '🔇' : '🔊' }}</button>
+                  <input type="range" min="0" max="1" step="0.05" v-model="volume" @input="changeVolume" class="volume-slider"/>
+                </div>
+                <!-- 全屏 -->
+                <button class="ctrl-btn" @click="toggleFullscreen" title="全屏 (F)">⛶</button>
+              </div>
+            </div>
+
+            <!-- 键盘快捷键提示小条 -->
+            <div class="keyboard-hints">
+              <span>快捷键：[空格] 播放/暂停</span>
+              <span>[↑/↓] 上下集切换</span>
+              <span>[←/→] 快退/快进 5s</span>
+              <span>[F] 或 [双击] 全屏</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右侧选集与短剧详情侧栏 -->
+        <aside v-show="sidebarOpen" id="episode-sidebar" class="theater-sidebar">
+          <!-- 短剧信息头部卡片 (点击弹出剧情详细信息) -->
+          <div class="sidebar-drama-header" @click="openDramaDetail" title="点击查看短剧详情与完整剧情介绍" role="button" tabindex="0" @keydown.enter="openDramaDetail">
+            <!-- 右上角收藏小红心按钮 (未点亮🤍 / 点亮❤️) -->
+            <button 
+              class="sidebar-fav-icon-btn" 
+              :class="{ favorited: isFavorited }" 
+              @click.stop="toggleFavCurrent" 
+              :title="isFavorited ? '已收藏此剧 (点击取消)' : '收藏此剧 (点击加入收藏)'"
+              :aria-label="isFavorited ? '已收藏此剧' : '收藏此剧'"
+            >
+              <span class="fav-heart-icon">{{ isFavorited ? '❤️' : '🤍' }}</span>
+            </button>
+
+            <div class="sidebar-drama-top">
+              <img :src="activeSeries?.cover" class="sidebar-cover" @error="onImageError"/>
+              <div class="sidebar-meta">
+                <h3 class="sidebar-title" :title="activeSeries?.series_title">{{ activeSeries?.series_title }}</h3>
+                <div class="sidebar-stats-row">
+                  <span class="sidebar-count">共 {{ activeEpisodes.length || activeSeries?.total }} 集全</span>
+                  <span v-if="activeSeries?.social_info?.hot_text" class="sidebar-hot-badge" title="全网热度">
+                    🔥 {{ activeSeries.social_info.hot_text }}
+                  </span>
+                  <span v-if="activeSeries?.social_info?.rating" class="sidebar-rating-badge" title="观众评分">
+                    ⭐ {{ activeSeries.social_info.rating }}分
+                  </span>
+                </div>
+                <div v-if="activeSeries?.tags && activeSeries.tags.length" class="sidebar-tags-row">
+                  <span v-for="tag in activeSeries.tags.slice(0, 3)" :key="tag" class="sidebar-tag-pill">{{ tag }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 剧情简介简要预览 (2行截断，带详情指示) -->
+            <div v-if="activeSeries?.intro" class="sidebar-intro-preview">
+              <p class="sidebar-intro-text">
+                {{ activeSeries.intro }}
+                <span class="sidebar-intro-more">详情 ↗</span>
+              </p>
+            </div>
+          </div>
+
+          <!-- 分集选项卡分页 (每组 30 集) -->
+          <div class="episode-group-tabs">
+            <button 
+              v-for="group in episodeGroups" 
+              :key="group.start"
+              class="group-tab-item"
+              :class="{ active: currentGroup.start === group.start }"
+              @click="currentGroup = group"
+            >
+              {{ group.start }}-{{ group.end }}
+            </button>
+          </div>
+
+          <!-- 分集按钮方块网格 -->
+          <div class="episode-grid">
+            <button 
+              v-for="ep in currentGroupEpisodes" 
+              :key="ep.vid"
+              class="episode-btn"
+              :class="{ 
+                active: ep.vid_index === activeEpisodeIndex,
+                watched: isEpisodeWatched(ep.vid_index)
+              }"
+              @click="switchEpisode(ep)"
+            >
+              <span v-if="ep.vid_index === activeEpisodeIndex" class="eq-icon">▶</span>
+              <span class="ep-num">{{ ep.vid_index }}</span>
+            </button>
+          </div>
+        </aside>
+      </div>
+    </main>
+
+    <!-- 演员个人主页与参演短剧弹窗 -->
+    <div v-if="activeActor" class="actor-modal-overlay" @click.self="closeActorDetail" @keydown="onActorModalKeydown">
+      <div class="actor-modal" role="dialog" aria-modal="true" tabindex="-1" :aria-label="(activeActor.name || '演员') + '的主页与作品'">
+        <div class="actor-modal-header">
+          <div class="actor-profile-main">
+            <img :src="activeActorDetail?.avatar || activeActor.avatar" :alt="activeActor.name" class="actor-profile-avatar" referrerpolicy="no-referrer" @error="onAvatarError" />
+            <div class="actor-profile-meta">
+              <div class="actor-profile-title-row">
+                <h2 class="actor-profile-name">{{ activeActor.name }}</h2>
+                <span v-if="activeActor.score" class="actor-score-tag"><span class="fire-icon">🔥</span> {{ activeActor.score }}</span>
+                <span v-if="activeActor.rank" class="actor-rank-pill">剧星榜 TOP {{ activeActor.rank }}</span>
+              </div>
+              <p v-if="activeActorDetail?.intro || activeActor.intro" class="actor-profile-intro">
+                {{ activeActorDetail?.intro || activeActor.intro }}
+              </p>
+              <!-- 合作演员推荐 -->
+              <div v-if="activeActorDetail?.related_celebrities?.length" class="related-celebrities-row">
+                <span class="related-label">合作演员：</span>
+                <div class="related-list">
+                  <button
+                    v-for="rel in activeActorDetail.related_celebrities"
+                    :key="rel.actor_id"
+                    class="related-actor-chip"
+                    @click="switchToRelatedActor(rel)"
+                    :title="rel.intro || rel.name"
+                  >
+                    <img :src="rel.avatar" :alt="rel.name" class="related-avatar" referrerpolicy="no-referrer" @error="onAvatarError" />
+                    <span>{{ rel.name }}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <button class="modal-close-btn" @click="closeActorDetail" title="关闭 (Esc)">✕</button>
+        </div>
+
+        <div class="actor-modal-body">
+          <div class="works-section-header">
+            <h3 class="works-title">🎬 参演短剧作品 ({{ actorWorksTotal || actorWorks.length }})</h3>
+            <span class="works-hint">点击任意短剧立即开播</span>
+          </div>
+
+          <!-- 1. 作品加载骨架屏 -->
+          <div v-if="loadingActorWorks" class="drama-grid" aria-label="正在加载作品列表" aria-busy="true">
+            <div v-for="n in 4" :key="n" class="skeleton-card" aria-hidden="true">
+              <div class="skeleton-cover"></div><div class="skeleton-line"></div>
+            </div>
+          </div>
+
+          <!-- 2. 作品加载失败状态 -->
+          <div v-else-if="actorWorksError" class="actor-works-error-box" role="alert">
+            <div class="error-icon">⚠️</div>
+            <p class="error-msg">{{ actorWorksError }}</p>
+            <button class="retry-btn" @click="retryLoadActorWorks">重试加载作品</button>
+          </div>
+
+          <!-- 3. 作品为空状态 -->
+          <div v-else-if="actorWorks.length === 0" class="empty-works">
+            <p>暂未查询到该演员的独立短剧作品，换位演员看看吧</p>
+          </div>
+
+          <!-- 4. 作品卡片网格与分页 -->
+          <div v-else class="actor-works-content">
+            <div class="drama-grid actor-works-grid">
+              <div
+                v-for="work in actorWorks"
+                :key="work.series_id"
+                class="drama-card"
+                @click="playActorWork(work)"
+              >
+                <div class="card-cover-wrapper">
+                  <img :src="work.cover" :alt="work.series_title" loading="lazy" class="card-cover" @error="onImageError"/>
+                  <div class="cover-overlay">
+                    <span class="play-badge">▶ 立即播放</span>
+                  </div>
+                  <span v-if="work.episode_count" class="episode-badge">全 {{ work.episode_count }} 集</span>
+                  <span v-if="work.rec_text" class="rec-badge">{{ work.rec_text }}</span>
+                </div>
+                <div class="card-info">
+                  <h4 class="drama-title" :title="work.series_title">{{ work.series_title }}</h4>
+                  <div v-if="work.sub_title" class="card-tags">
+                    <span class="card-tag">{{ work.sub_title }}</span>
+                  </div>
+                  <p v-if="work.description" class="drama-desc">{{ work.description }}</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- 分页加载更多作品 -->
+            <div v-if="actorWorksHasMore" class="actor-works-load-more">
+              <button
+                class="load-more-btn"
+                :disabled="loadingMoreWorks"
+                @click="loadMoreActorWorks"
+              >
+                <span v-if="loadingMoreWorks" class="spinner-small"></span>
+                <span>{{ loadingMoreWorks ? '正在加载更多作品...' : '加载更多参演短剧 (' + actorWorks.length + '/' + actorWorksTotal + ')' }}</span>
+              </button>
+            </div>
+            <div v-else-if="actorWorks.length > 0 && actorWorksTotal > 0" class="actor-works-all-loaded">
+              <span>已加载全部 {{ actorWorks.length }} 部短剧作品</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 短剧详细介绍模态框 -->
+    <div v-if="showDramaDetailModal && activeSeries" class="drama-modal-overlay" @click.self="closeDramaDetail" @keydown="onDramaModalKeydown">
+      <div class="drama-modal" role="dialog" aria-modal="true" tabindex="-1" :aria-label="(activeSeries.series_title || '短剧') + '的详细信息'">
+        <div class="drama-modal-header">
+          <div class="drama-detail-main">
+            <img :src="activeSeries.cover" :alt="activeSeries.series_title" class="drama-detail-cover" referrerpolicy="no-referrer" @error="onImageError" />
+            <div class="drama-detail-meta">
+              <div class="drama-detail-title-row">
+                <h2 class="drama-detail-title">{{ activeSeries.series_title }}</h2>
+                <button class="drama-detail-fav-btn" :class="{ favorited: isFavorited }" @click="toggleFavCurrent">
+                  {{ isFavorited ? '❤️ 已在收藏夹' : '🤍 加入收藏' }}
+                </button>
+              </div>
+              <div class="drama-detail-stats">
+                <span class="detail-count-badge">共 {{ activeEpisodes.length || activeSeries.total }} 集全</span>
+                <span v-if="activeSeries.social_info?.hot_text" class="detail-hot-tag">
+                  <span class="fire-icon">🔥</span> {{ activeSeries.social_info.hot_text }}
+                </span>
+                <span v-if="activeSeries.social_info?.rating" class="detail-rating-tag">
+                  ⭐ {{ activeSeries.social_info.rating }} 分
+                </span>
+                <span v-if="activeSeries.social_info?.like_count" class="detail-stat-dim">
+                  👍 {{ activeSeries.social_info.like_count }} 点赞
+                </span>
+              </div>
+              <div v-if="activeSeries.tags && activeSeries.tags.length" class="drama-detail-tags">
+                <span v-for="tag in activeSeries.tags" :key="tag" class="drama-tag-pill">{{ tag }}</span>
+              </div>
+            </div>
+          </div>
+          <button class="modal-close-btn" @click="closeDramaDetail" title="关闭 (Esc)">✕</button>
+        </div>
+        <div class="drama-modal-body">
+          <div class="drama-intro-section">
+            <h4 class="intro-heading">📖 剧情简介</h4>
+            <div class="drama-intro-content">
+              <p v-if="activeSeries.intro">{{ activeSeries.intro }}</p>
+              <p v-else class="intro-empty">暂无该剧剧情简介</p>
+            </div>
+          </div>
+
+          <!-- 演职员表 (有演员信息时展示，可点击查看演员主页) -->
+          <div v-if="activeSeries.celebrities && activeSeries.celebrities.length" class="drama-cast-section">
+            <h4 class="intro-heading">🎬 演职员表 ({{ activeSeries.celebrities.length }})</h4>
+            <div class="drama-cast-list">
+              <div 
+                v-for="actor in activeSeries.celebrities" 
+                :key="actor.actor_id || actor.name"
+                class="drama-cast-card"
+                :class="{ clickable: !!actor.actor_id }"
+                @click="actor.actor_id && openActorFromDrama(actor)"
+                :title="actor.actor_id ? '点击查看演员主页及作品' : actor.name"
+              >
+                <img v-if="actor.avatar" :src="actor.avatar" :alt="actor.name" class="cast-avatar" referrerpolicy="no-referrer" @error="onAvatarError" />
+                <div v-else class="cast-avatar-fallback">👤</div>
+                <div class="cast-info">
+                  <span class="cast-name">{{ actor.name }}</span>
+                  <span v-if="actor.role" class="cast-role">{{ actor.role }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="drama-modal-footer">
+          <button class="drama-continue-btn" @click="closeDramaDetail">继续播放</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 快捷键指南弹窗 -->
+    <div v-if="showShortcutsModal" class="shortcuts-modal-overlay" @click.self="closeShortcutsModal">
+      <div class="shortcuts-modal" role="dialog" aria-modal="true" tabindex="-1" aria-label="快捷键指南">
+        <div class="shortcuts-modal-header">
+          <div class="shortcuts-header-title">
+            <span class="shortcuts-header-icon">⌨️</span>
+            <h3>快捷键操作指南</h3>
+          </div>
+          <button class="modal-close-btn" @click="closeShortcutsModal" title="关闭 (Esc)">✕</button>
+        </div>
+        <div class="shortcuts-modal-body">
+          <div class="shortcut-list">
+            <div class="shortcut-item">
+              <div class="keys"><kbd>空格</kbd> <span class="key-or">/</span> <kbd>K</kbd></div>
+              <div class="desc">播放 / 暂停视频</div>
+            </div>
+            <div class="shortcut-item">
+              <div class="keys"><kbd>↑</kbd> <span class="key-or">/</span> <kbd>PageUp</kbd></div>
+              <div class="desc">切换至上一集</div>
+            </div>
+            <div class="shortcut-item">
+              <div class="keys"><kbd>↓</kbd> <span class="key-or">/</span> <kbd>PageDown</kbd></div>
+              <div class="desc">切换至下一集</div>
+            </div>
+            <div class="shortcut-item">
+              <div class="keys"><kbd>←</kbd> <span class="key-or">/</span> <kbd>→</kbd></div>
+              <div class="desc">快退 / 快进 5 秒</div>
+            </div>
+            <div class="shortcut-item">
+              <div class="keys"><kbd>F</kbd> <span class="key-or">/</span> <span class="mouse-action">双击画面</span></div>
+              <div class="desc">进入 / 退出全屏模式</div>
+            </div>
+            <div class="shortcut-item">
+              <div class="keys"><kbd>M</kbd></div>
+              <div class="desc">静音 / 恢复声音</div>
+            </div>
+            <div class="shortcut-item">
+              <div class="keys"><kbd>Esc</kbd></div>
+              <div class="desc">退出全屏 / 关闭当前弹窗</div>
+            </div>
+            <div class="shortcut-item">
+              <div class="keys"><kbd>Alt</kbd></div>
+              <div class="desc">Windows 原生传统菜单栏唤出 / 隐藏</div>
+            </div>
+          </div>
+        </div>
+        <div class="shortcuts-modal-footer">
+          <button class="shortcuts-confirm-btn" @click="closeShortcutsModal">我知道了</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 关于 红果开源播放器 弹窗 -->
+    <div v-if="showAboutModal" class="about-modal-overlay" @click.self="closeAboutModal">
+      <div class="about-modal" role="dialog" aria-modal="true" tabindex="-1" aria-label="关于 红果开源播放器">
+        <div class="about-modal-header">
+          <div class="about-brand-row">
+            <img class="about-brand-icon" src="assets/app-icon.png" alt="" width="44" height="44" />
+            <div class="about-brand-titles">
+              <h3 class="about-title">红果开源播放器</h3>
+              <span class="about-version">v1.2.0 · 原生桌面客户端</span>
+            </div>
+          </div>
+          <button class="modal-close-btn" @click="closeAboutModal" title="关闭 (Esc)">✕</button>
+        </div>
+        <div class="about-modal-body">
+          <p class="about-desc">
+            一款基于 Electron、Node.js 与 Vue 打造的开源跨平台红果短剧原生桌面播放客户端。
+            无需安装安卓模拟器，内置流媒体解密与本地代理，提供剧目检索、演员榜单、沉浸式影院观影与本地进度记忆。
+          </p>
+          <div class="about-feature-tags">
+            <span class="about-tag">🎬 实时流式解密</span>
+            <span class="about-tag">🚀 免安卓模拟器</span>
+            <span class="about-tag">📱 沉浸式自适应画幅</span>
+            <span class="about-tag">🌟 剧星榜与演员主页</span>
+            <span class="about-tag">⚡ 智能节点加速</span>
+          </div>
+          <div class="about-meta-list">
+            <div class="about-meta-item">
+              <span class="meta-label">开源许可：</span>
+              <span class="meta-value">GPL-3.0 License</span>
+            </div>
+            <div class="about-meta-item">
+              <span class="meta-label">项目主页：</span>
+              <a class="meta-link" href="https://github.com/zfdang/hongguo-open-player" target="_blank" rel="noopener">github.com/zfdang/hongguo-open-player</a>
+            </div>
+          </div>
+          <div class="about-disclaimer">
+            <strong>免责声明：</strong>
+            本项目仅供个人学习、多媒体流处理与跨平台桌面应用开发技术交流研究。所有音视频数据均实时请求自公开网络服务，本项目不提供、不存储亦不分发任何音视频资源文件。
+          </div>
+        </div>
+        <div class="about-modal-footer">
+          <button class="about-btn github-btn" @click="openGithubRepo">访问 GitHub 主页</button>
+          <button class="about-btn confirm-btn" @click="closeAboutModal">确定</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="toastText" class="app-toast" role="status" aria-live="polite">{{ toastText }}</div>
+  </div>
+
+  <!-- 引入本地 Vue 3 -->
+  <script src="js/vue.global.prod.js"></script>
+  <script src="js/local-store.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
